@@ -724,7 +724,7 @@ export class Group extends Node {
                 rect.y = scaledRect.y;
                 rect.width = scaledRect.width;
                 rect.height = scaledRect.height;
-                draw2D?.drawNinePatch(bitmap, rect, rgba, opacity);
+                draw2D?.drawNinePatch(bitmap, rect, rgba, opacity, scale);
                 return rect;
             }
             let scaleX = rect.width === 0 ? 1 : rect.width / bitmap.width;

@@ -545,7 +545,12 @@ export class IfDraw2D {
         this.component.getContext().restore();
     }
 
-    drawNinePatch(bitmap: RoBitmap, rect: Rect, rgba?: number, opacity?: number) {
+    /**
+     * Draws a 9-patch into [rect] (already scaled to the screen). [scale] is the node's effective Group scale: the
+     * fixed corners and edges scale with it like everything else a scaled Group draws, as on a device; without it a
+     * small card under a scaled-down Group (a 1920-designed scene on a 720p UI) grew to its unscaled corner sum.
+     */
+    drawNinePatch(bitmap: RoBitmap, rect: Rect, rgba?: number, opacity?: number, scale: number[] = [1, 1]) {
         const ctx = this.component.getContext();
         const style = resolveBlitStyle(rgba, opacity);
         const image = getCanvasFromDraw2d(bitmap, style.rgba);
@@ -560,13 +565,19 @@ export class IfDraw2D {
         const sw = image.width;
         const sh = image.height;
 
-        const lw = patchSizes.left; // Left fixed-corner width
-        const rw = patchSizes.right; // Right fixed-corner width
-        const th = patchSizes.top; // Top fixed-corner height
-        const bh = patchSizes.bottom; // Bottom fixed-corner height
+        const sx = Math.abs(scale[0]) || 1;
+        const sy = Math.abs(scale[1]) || 1;
+        const slw = patchSizes.left; // Left fixed-corner width (source pixels)
+        const srw = patchSizes.right; // Right fixed-corner width (source pixels)
+        const sth = patchSizes.top; // Top fixed-corner height (source pixels)
+        const sbh = patchSizes.bottom; // Bottom fixed-corner height (source pixels)
+        const lw = slw * sx; // Left corner width on screen
+        const rw = srw * sx; // Right corner width on screen
+        const th = sth * sy; // Top corner height on screen
+        const bh = sbh * sy; // Bottom corner height on screen
 
-        const cw = Math.max(0, sw - 2 - lw - rw); // Center source width (drawable area)
-        const ch = Math.max(0, sh - 2 - th - bh); // Center source height (drawable area)
+        const cw = Math.max(0, sw - 2 - slw - srw); // Center source width (drawable area)
+        const ch = Math.max(0, sh - 2 - sth - sbh); // Center source height (drawable area)
 
         // A 9-patch cannot render smaller than its fixed corners, so clamp the drawn size to the
         // corner sum. This keeps the rounded ends from overlapping/inverting at tiny sizes (e.g. a
@@ -575,30 +586,31 @@ export class IfDraw2D {
         const drawW = Math.max(width, lw + rw); // Drawn width (never below the fixed corners)
         const drawH = Math.max(height, th + bh); // Drawn height (never below the fixed corners)
 
-        const targetCW = Math.max(0, drawW - lw - rw); // Target center width
-        const targetCH = Math.max(0, drawH - th - bh); // Target center height
+        // Cut lines on the screen, rounded once and shared by the pieces on both sides, so scaled (fractional) corners
+        // never leave a 1 px gap or overlap between neighbouring pieces.
+        const xs = [x, x + lw, x + drawW - rw, x + drawW].map(Math.round);
+        const ys = [y, y + th, y + drawH - bh, y + drawH].map(Math.round);
+        const srcX = [1, 1 + slw, sw - 1 - srw];
+        const srcW = [slw, cw, srw];
+        const srcY = [1, 1 + sth, sh - 1 - sbh];
+        const srcH = [sth, ch, sbh];
 
         // The nine patches (corners fixed, edges/center stretched), in source and destination rects.
-        const patches: DrawChunk[] = [
-            { sx: 1, sy: 1, sw: lw, sh: th, dx: x, dy: y, dw: lw, dh: th }, // Top-left corner
-            { sx: 1 + lw, sy: 1, sw: cw, sh: th, dx: x + lw, dy: y, dw: targetCW, dh: th }, // Top edge
-            { sx: sw - 1 - rw, sy: 1, sw: rw, sh: th, dx: x + drawW - rw, dy: y, dw: rw, dh: th }, // Top-right corner
-            { sx: 1, sy: 1 + th, sw: lw, sh: ch, dx: x, dy: y + th, dw: lw, dh: targetCH }, // Left edge
-            { sx: 1 + lw, sy: 1 + th, sw: cw, sh: ch, dx: x + lw, dy: y + th, dw: targetCW, dh: targetCH }, // Center
-            { sx: sw - 1 - rw, sy: 1 + th, sw: rw, sh: ch, dx: x + drawW - rw, dy: y + th, dw: rw, dh: targetCH }, // Right edge
-            { sx: 1, sy: sh - 1 - bh, sw: lw, sh: bh, dx: x, dy: y + drawH - bh, dw: lw, dh: bh }, // Bottom-left corner
-            { sx: 1 + lw, sy: sh - 1 - bh, sw: cw, sh: bh, dx: x + lw, dy: y + drawH - bh, dw: targetCW, dh: bh }, // Bottom edge
-            {
-                sx: sw - 1 - rw,
-                sy: sh - 1 - bh,
-                sw: rw,
-                sh: bh,
-                dx: x + drawW - rw,
-                dy: y + drawH - bh,
-                dw: rw,
-                dh: bh,
-            }, // Bottom-right corner
-        ];
+        const patches: DrawChunk[] = [];
+        for (let row = 0; row < 3; row++) {
+            for (let col = 0; col < 3; col++) {
+                patches.push({
+                    sx: srcX[col],
+                    sy: srcY[row],
+                    sw: srcW[col],
+                    sh: srcH[row],
+                    dx: xs[col],
+                    dy: ys[row],
+                    dw: xs[col + 1] - xs[col],
+                    dh: ys[row + 1] - ys[row],
+                });
+            }
+        }
 
         ctx.save();
         // Set context properties (alpha blending, smoothing)
